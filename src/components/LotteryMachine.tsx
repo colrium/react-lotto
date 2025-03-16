@@ -1,17 +1,29 @@
-import React, { useState, useRef, useEffect, memo } from 'react';
+import React, { useState, useRef, useEffect, memo, Suspense } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { Physics, useSphere, useBox } from '@react-three/cannon';
 import { OrbitControls, Text } from '@react-three/drei';
 import * as THREE from 'three';
-import { Box, Button } from '@mui/material';
+import { Box, Button, CircularProgress } from '@mui/material';
 
 const BALL_COUNT = 30;
 const BALL_RADIUS = 0.3;
 const CAGE_RADIUS = 3;
+const noop = () => {};
 
-const Ball = ({ number, position, ballRef, color='blue', textColor='white', radius = BALL_RADIUS, cageRadius=CAGE_RADIUS }) => {
+
+const handleContextLost = (event) => {
+  event.preventDefault();
+  console.warn('WebGL context lost.');
+};
+
+const handleContextRestored = () => {
+  console.log('WebGL context restored.');
+};
+
+const Ball = ({ number, position, ballRef, color='blue', textColor='white', radius = BALL_RADIUS, cageRadius=CAGE_RADIUS, inCage = true }) => {
+  
   const [ref, api] = useSphere(() => ({ mass: 1, position, args: [radius] }));
-  const renderRef = useRef(0);
+
   const pos = useRef([0, 0, 0]);
   
   // Store current position in ref
@@ -41,10 +53,6 @@ const Ball = ({ number, position, ballRef, color='blue', textColor='white', radi
 		const vz = -z * 0.5 + (Math.random() - 0.5) * 2;
 		api.velocity.set(vx, vy, vz);
 	}
-  });
-  
-  useEffect(() => {
-    renderRef.current++;
   });
   
   return (
@@ -92,25 +100,26 @@ const Cage = ({radius = CAGE_RADIUS, color = 'white'}) => {
   );
 };
 
-const LotteryMachine = ({ ballCount = BALL_COUNT, cageRadius = CAGE_RADIUS, ballRadius = BALL_RADIUS }) => {
-	const [selectedNumber, setSelectedNumber] = useState<number | null>(null);
+const LotteryMachine = ({ ballCount = BALL_COUNT, cageRadius = CAGE_RADIUS, ballRadius = BALL_RADIUS, value = null, onChange = noop }) => {
+	const [selectedNumber, setSelectedNumber] = useState<number | null>(value);
 	const balls = useRef(
 		Array(ballCount)
 			.fill(null)
 			.map(() => React.createRef())
 	);
 	const renderRef = useRef(0);
+	const canvasRef = useRef<HTMLCanvasElement>(null);
 
 	const shuffleBalls = () => {
 		setSelectedNumber(null);
-    console.log('Shuffling balls...', balls.current);
+		console.log('Shuffling balls...', balls.current);
 
 		// Apply random forces to all balls to simulate mixing
-		balls.current.forEach((ball) => {
-			if (ball && ball.api) {
+		balls.current.forEach((ball) => {      
+			if (ball.current && ball.current.api) {
 				const force = [(Math.random() - 0.5) * 10, (Math.random() - 0.5) * 10, (Math.random() - 0.5) * 10];
-        console.log('Applying force to ball', force);
-				ball.api.applyForce(force, [0, 0, 0]);
+				console.log('Applying force to ball', force);
+				ball.current.api.applyForce(force, [0, 0, 0]);
 			}
 		});
 
@@ -123,21 +132,40 @@ const LotteryMachine = ({ ballCount = BALL_COUNT, cageRadius = CAGE_RADIUS, ball
 		renderRef.current++;
 	});
 
-  useEffect(() => {
+	useEffect(() => {
 		setTimeout(() => {
-      shuffleBalls();
-    }, 15000);
-  }, []);
+			shuffleBalls();
+		}, 15000);
+	}, []);
+
+	useEffect(() => {
+		const canvas = canvasRef.current;
+		if (!canvas) return;
+		canvas.addEventListener('webglcontextlost', handleContextLost);
+		canvas.addEventListener('webglcontextrestored', handleContextRestored);
+
+		return () => {
+			canvas.removeEventListener('webglcontextlost', handleContextLost);
+			canvas.removeEventListener('webglcontextrestored', handleContextRestored);
+		};
+	}, []);
+
 	console.log('LotteryMachine', renderRef.current);
 
 	return (
-		<Box className="relative">
-			<>
+		<Box className="relative w-full h-full">
+			<Suspense
+				fallback={
+					<CircularProgress
+						size={24}
+						className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2"
+					/>
+				}
+			>
 				<Canvas
 					shadows
 					camera={{ position: [0, 5, 10], fov: 50 }}
-					gl={{ preserveDrawingBuffer: true }}
-					className="absolute top-0 left-0"
+					ref={canvasRef}
 				>
 					<ambientLight intensity={0.5} />
 					<directionalLight
@@ -172,16 +200,18 @@ const LotteryMachine = ({ ballCount = BALL_COUNT, cageRadius = CAGE_RADIUS, ball
 					</Physics>
 					<OrbitControls />
 				</Canvas>
-			</>
-			<Button
-				onClick={shuffleBalls}
-				className="absolute top-8 left-8"
-				variant="contained"
-				color="primary"
-			>
-				Start
-			</Button>
-			{selectedNumber && <div className="absolute top-8 left-8">Winner: {selectedNumber}</div>}
+			</Suspense>
+			<Box className="absolute top-0 left-0 z-50 flex w-full gap-8 p-4">
+				<Button
+					onClick={shuffleBalls}
+					variant="contained"
+					color="primary"
+				>
+					Start
+				</Button>
+        <div className="flex-1"></div>
+				{selectedNumber && <div >Winner: {selectedNumber}</div>}
+			</Box>
 		</Box>
 	);
 };
