@@ -102,6 +102,7 @@ const Cage = ({radius = CAGE_RADIUS, color = 'white'}) => {
 
 const LotteryMachine = ({ ballCount = BALL_COUNT, cageRadius = CAGE_RADIUS, ballRadius = BALL_RADIUS, value = null, onChange = noop }) => {
 	const [selectedNumber, setSelectedNumber] = useState<number | null>(value);
+  const [shuffling, setShuffling] = useState(false);
 	const balls = useRef(
 		Array(ballCount)
 			.fill(null)
@@ -112,13 +113,16 @@ const LotteryMachine = ({ ballCount = BALL_COUNT, cageRadius = CAGE_RADIUS, ball
 
 	const shuffleBalls = () => {
 		setSelectedNumber(null);
+    setShuffling(true);
 		console.log('Shuffling balls...', balls.current);
 
 		// Apply random forces to all balls to simulate mixing
 		balls.current.forEach((ball) => {      
-			if (ball.current && ball.current.api) {
+			if (ball.current?.api) {
 				const force = [(Math.random() - 0.5) * 10, (Math.random() - 0.5) * 10, (Math.random() - 0.5) * 10];
-				console.log('Applying force to ball', force);
+				
+        console.log('Applying force to ball.current.api', ball.current.api);
+        console.log('Applying force to ball', force);
 				ball.current.api.applyForce(force, [0, 0, 0]);
 			}
 		});
@@ -128,15 +132,6 @@ const LotteryMachine = ({ ballCount = BALL_COUNT, cageRadius = CAGE_RADIUS, ball
 			setSelectedNumber(winner);
 		}, 5000);
 	};
-	useEffect(() => {
-		renderRef.current++;
-	});
-
-	useEffect(() => {
-		setTimeout(() => {
-			shuffleBalls();
-		}, 15000);
-	}, []);
 
 	useEffect(() => {
 		const canvas = canvasRef.current;
