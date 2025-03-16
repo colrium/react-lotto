@@ -8,19 +8,8 @@ import { Box, Button, CircularProgress } from '@mui/material';
 const BALL_COUNT = 30;
 const BALL_RADIUS = 0.3;
 const CAGE_RADIUS = 3;
-const noop = () => {};
 
-
-const handleContextLost = (event) => {
-  event.preventDefault();
-  console.warn('WebGL context lost.');
-};
-
-const handleContextRestored = () => {
-  console.log('WebGL context restored.');
-};
-
-const Ball = ({ number, position, ballRef, color='blue', textColor='white', radius = BALL_RADIUS, cageRadius=CAGE_RADIUS, inCage = true }) => {
+const Ball = ({ number, position, ballRef, color='red', textColor='white', radius = BALL_RADIUS, cageRadius=CAGE_RADIUS, inCage = true, velocity = [0, 0, 0] }) => {
   
   const [ref, api] = useSphere(() => ({ mass: 1, position, args: [radius] }));
 
@@ -28,11 +17,17 @@ const Ball = ({ number, position, ballRef, color='blue', textColor='white', radi
   
   // Store current position in ref
   useEffect(() => {
-    api.position.subscribe((p) => (pos.current = p));
+    api.position.subscribe((p) => {
+      pos.current = p;
+      ballRef.current = { ...ballRef.current, position: p };
+  });
+  api.velocity.subscribe((v) => {
+		ballRef.current = { ...ballRef.current, velocity: v };
+  });
     
     // Store the api in the ref for external access
     if (ballRef) {
-      ballRef.current = { api };
+      ballRef.current = { dom: ref.current, api };
     }
   }, [api, ballRef]);
 
@@ -48,9 +43,9 @@ const Ball = ({ number, position, ballRef, color='blue', textColor='white', radi
 		api.position.set(x * scale, y * scale, z * scale);
 
 		// Add a small random velocity inward
-		const vx = -x * 0.5 + (Math.random() - 0.5) * 2;
-		const vy = -y * 0.5 + (Math.random() - 0.5) * 2;
-		const vz = -z * 0.5 + (Math.random() - 0.5) * 2;
+		const vx = -x * 0.5 + (Math.random() - 0.5) * cageRadius;
+		const vy = -y * 0.5 + (Math.random() - 0.5) * cageRadius;
+		const vz = -z * 0.5 + (Math.random() - 0.5) * cageRadius;
 		api.velocity.set(vx, vy, vz);
 	}
   });
@@ -72,16 +67,16 @@ const Ball = ({ number, position, ballRef, color='blue', textColor='white', radi
   );
 };
 
-const Cage = ({radius = CAGE_RADIUS, color = 'white'}) => {
-  // Create an invisible boundary at the cage radius
-  const [boundaryRef] = useBox(() => ({
-    args: [radius * 2, radius * 2, radius * 2],
-    position: [0, 0, 0],
-    type: 'Static',
-    isTrigger: true,
-  }));
-  
-  return (
+const Cage = ({ radius = CAGE_RADIUS, color = 'white', wireframe = true }) => {
+	// Create an invisible boundary at the cage radius
+	const [boundaryRef] = useBox(() => ({
+		args: [radius * 2, radius * 2, radius * 2],
+		position: [0, 0, 0],
+		type: 'Static',
+		isTrigger: true
+	}));
+
+	return (
 		<>
 			<mesh
 				ref={boundaryRef}
@@ -93,59 +88,86 @@ const Cage = ({radius = CAGE_RADIUS, color = 'white'}) => {
 					color={color}
 					opacity={0.2}
 					transparent
-					wireframe
+					wireframe={wireframe}
 				/>
 			</mesh>
 		</>
-  );
+	);
 };
 
-const LotteryMachine = ({ ballCount = BALL_COUNT, cageRadius = CAGE_RADIUS, ballRadius = BALL_RADIUS, value = null, onChange = noop }) => {
-	const [selectedNumber, setSelectedNumber] = useState<number | null>(value);
-  const [shuffling, setShuffling] = useState(false);
-	const balls = useRef(
-		Array(ballCount)
-			.fill(null)
-			.map(() => React.createRef())
-	);
-	const renderRef = useRef(0);
+const LotteryMachine = ({ ballCount = BALL_COUNT, cageRadius = CAGE_RADIUS, ballRadius = BALL_RADIUS }: { ballCount?: number; cageRadius?: number; ballRadius?: number; }) => {
+	const [selectedNumber, setSelectedNumber] = useState<number | null>(null);
+	const [shuffling, setShuffling] = useState(false);
+	const ballsRef = useRef(Array(ballCount).fill(null).map(() => React.createRef<{ api: { applyForce: (force: [number, number, number], point: [number, number, number]) => void; position: [number, number, number]; } }>()));
+
+
+	const shuffleBalls = (duration = 10000) => {
+		setSelectedNumber(null);
+		setShuffling(true);
+		console.log('Shuffling balls...', ballsRef.current);
+
+		const startTime = Date.now();
+		
+		const animate = () => {
+			const elapsed = Date.now() - startTime;
+			const progress = Math.min(elapsed / duration, 1);
+			const speedFactor = Math.sin(progress * Math.PI);
+			
+			ballsRef.current.forEach((ball) => {
+				if (ball.current?.api) {
+					const force = [
+						(Math.random() - ballRadius) * 100 * speedFactor,
+						(Math.random() - ballRadius) * 100 * speedFactor,
+						(Math.random() - ballRadius) * 100 * speedFactor
+					];
+					ball.current.api.applyForce(force, ball.current.position);
+				} else {
+					console.warn('Ball reference or API not found for:', ball);
+				}
+			});
+			
+			if (progress < 1) {
+        setTimeout(() => {
+				requestAnimationFrame(animate);
+        }, 100);
+			} else {
+				setShuffling(false);
+				const winner = Math.floor(Math.random() * ballCount) + 1;
+				setSelectedNumber(winner);
+			}
+		};
+		
+		requestAnimationFrame(animate);
+	};
+
+  
+
+	
+
 	const canvasRef = useRef<HTMLCanvasElement>(null);
 
-	const shuffleBalls = () => {
-		setSelectedNumber(null);
-    setShuffling(true);
-		console.log('Shuffling balls...', balls.current);
-
-		// Apply random forces to all balls to simulate mixing
-		balls.current.forEach((ball) => {      
-			if (ball.current?.api) {
-				const force = [(Math.random() - 0.5) * 10, (Math.random() - 0.5) * 10, (Math.random() - 0.5) * 10];
-				
-        console.log('Applying force to ball.current.api', ball.current.api);
-        console.log('Applying force to ball', force);
-				ball.current.api.applyForce(force, [0, 0, 0]);
-			}
-		});
-
-		setTimeout(() => {
-			const winner = Math.floor(Math.random() * ballCount) + 1;
-			setSelectedNumber(winner);
-		}, 5000);
+	const handleContextLost = (event: WebGLContextEvent) => {
+		event.preventDefault();
+		console.warn('WebGL context lost.');
 	};
+
+	const handleContextRestored = () => {
+		console.log('WebGL context restored.');
+	};
+
+  
+
 
 	useEffect(() => {
 		const canvas = canvasRef.current;
 		if (!canvas) return;
 		canvas.addEventListener('webglcontextlost', handleContextLost);
 		canvas.addEventListener('webglcontextrestored', handleContextRestored);
-
 		return () => {
 			canvas.removeEventListener('webglcontextlost', handleContextLost);
 			canvas.removeEventListener('webglcontextrestored', handleContextRestored);
 		};
 	}, []);
-
-	console.log('LotteryMachine', renderRef.current);
 
 	return (
 		<Box className="relative w-full h-full">
@@ -163,30 +185,22 @@ const LotteryMachine = ({ ballCount = BALL_COUNT, cageRadius = CAGE_RADIUS, ball
 					ref={canvasRef}
 				>
 					<ambientLight intensity={0.5} />
-					<directionalLight
-						position={[5, 5, 5]}
-						intensity={1}
-						castShadow
-					/>
+					<directionalLight position={[5, 5, 5]} intensity={1} castShadow />
 					<Physics gravity={[0, -9.81, 0]}>
 						<Cage />
 						{Array.from({ length: ballCount }).map((_, i) => {
-							// Ensure initial positions are well within the cage
 							const angle1 = Math.random() * Math.PI * 2;
 							const angle2 = Math.random() * Math.PI;
 							const radius = Math.random() * (cageRadius - ballRadius - 0.5);
-
-							// Convert spherical coordinates to Cartesian
 							const x = radius * Math.sin(angle2) * Math.cos(angle1);
 							const y = radius * Math.sin(angle2) * Math.sin(angle1);
 							const z = radius * Math.cos(angle2);
-
 							return (
 								<Ball
 									key={i}
 									number={i + 1}
 									position={[x, y, z]}
-									ballRef={balls.current[i]}
+									ballRef={ballsRef.current[i]}
 									cageRadius={cageRadius}
 									radius={ballRadius}
 								/>
@@ -198,14 +212,13 @@ const LotteryMachine = ({ ballCount = BALL_COUNT, cageRadius = CAGE_RADIUS, ball
 			</Suspense>
 			<Box className="absolute top-0 left-0 z-50 flex w-full gap-8 p-4">
 				<Button
-					onClick={shuffleBalls}
+					onClick={() => shuffleBalls(10000)}
 					variant="contained"
 					color="primary"
 				>
 					Start
 				</Button>
-        <div className="flex-1"></div>
-				{selectedNumber && <div >Winner: {selectedNumber}</div>}
+				{selectedNumber && <div>Winner: {selectedNumber}</div>}
 			</Box>
 		</Box>
 	);
